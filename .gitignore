@@ -7,3 +7,5 @@ node_modules/
 # Ignore compiled output or build directories
 dist/
 build/
+
+config.env/
