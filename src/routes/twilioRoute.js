@@ -1,12 +1,10 @@
 const express = require("express");
 const twilioController = require("./../controllers/twilioController");
-const twilioControllerGetContext = require("./../../functions/get-context.protected");
 
 const router = express.Router();
 
 router.route("/").post(twilioController.sendWhatsAppMessage);
-// .patch(twilioController.updateCustomer);
-
-// router.route("/").post(twilioControllerGetContext.handler);
+router.route("/incoming").post(twilioController.createNewArrival);
+router.route("/notComing").post(twilioController.createNotComing);
 
 module.exports = router;

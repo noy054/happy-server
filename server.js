@@ -9,7 +9,6 @@ process.on("uncaughtException", (err) => {
 
 dotenv.config({ path: "./config.env" });
 const app = require("./app");
-const { baseModelName } = require("./src/models/MainListModel");
 
 const DB = process.env.DATABASE.replace(
   "<PASSWORD>",
@@ -24,11 +23,15 @@ mongoose
   .then(() => console.log("DB connection successful!"))
   .catch((err) => console.log(err.message));
 
-const port = process.env.PORT || "https://stale-ghosts-push.loca.lt";
-const ip = "10.20.0.19";
+const port = process.env.PORT || "3000";
 
 const server = app.listen(port, () => {
   console.log(`App running on port ${port}...`);
+});
+
+const io = require("./webSocket").init(server);
+io.on("connection", (soket) => {
+  console.log("Client connected");
 });
 
 process.on("unhandledRejection", (err) => {

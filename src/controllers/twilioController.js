@@ -1,11 +1,13 @@
 const express = require("express");
 const TestModel = require("./../models/TestModel");
+const ArrivalsListModel = require("./../models/ArrivalsListModel");
+const NotComingListModel = require("./../models/NotComingListModel");
 const catchAsync = require("./../utils/catchAsync");
-// const Content = require("twilio/lib/rest/Content");
+const io = require("./../../webSocket");
+
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = require("twilio")(accountSid, authToken);
-const handler = require("../../functions/get-context.protected");
 
 client.serverless.v1
   .services("ZSed7ad9fe3598d69f5615e4aba1ed971b")
@@ -20,32 +22,73 @@ const contentVariables = {
   6: "",
 };
 
-// Function to send WhatsApp message
-const sendWhatsAppMessage = async (customers, contentVariables, limit) => {
-  const messagesPromises = customers.slice(0, limit).map((item) => {
-    return client.messages
-      .create({
-        from: "MG52da09d866bed28dd22017df003ad9a4",
-        contentSid: "HXd47f1233df00cb1fe569bcf1d7f02601",
-        contentVariables: JSON.stringify({ 1: item.name, ...contentVariables }),
-        to: `whatsapp:${item.phoneNumber}`,
-        statusCallback: "https://tasty-bees-yell.loca.lt/webhook",
-      })
-      .then((message) => {
-        registerMessage(message, item.phoneNumber);
-      });
-  });
+let limitForTheFirestMessage;
 
-  return Promise.all(messagesPromises);
-};
+exports.createNewArrival = catchAsync(async (req, res) => {
+  // Extract relevant information from the request
+  const phone = req.body.phone;
+
+  const person = await TestModel.findOne({ phoneNumber: phone });
+  const { name, id, phoneNumber } = person;
+  if (person) {
+    const newCustomerArrive = await ArrivalsListModel.create({
+      name,
+      id,
+      phoneNumber,
+    });
+
+    const allNewCustomers = await ArrivalsListModel.find().select("-_id");
+    io.getIO().emit("postNewArrivel", { data: allNewCustomers });
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        customer: newCustomerArrive,
+      },
+    });
+  } else {
+    console.log("Person does not exist in the collection.");
+  }
+});
+
+exports.createNotComing = catchAsync(async (req, res) => {
+  const phone = req.body.phone;
+
+  const person = await TestModel.findOne({ phoneNumber: phone });
+  const { name, id, phoneNumber } = person;
+  if (person) {
+    const newCustomerArrive = await NotComingListModel.create({
+      name,
+      id,
+      phoneNumber,
+    });
+
+    const allNewCustomers = await NotComingListModel.find().select("-_id");
+    io.getIO().emit("postNotCommingCustomer", { data: allNewCustomers });
+
+    limitForTheFirestMessage++;
+    console.log("limitForTheFirestMessage", limitForTheFirestMessage);
+    const customers = await findeLimitedCustomer(1, limitForTheFirestMessage);
+    console.log("customers", customers);
+    sendWhatsAppMessage(customers, contentVariables);
+    res.status(200).json({
+      status: "success",
+      data: {
+        customer: newCustomerArrive,
+      },
+    });
+  } else {
+    console.log("Person does not exist in the collection.");
+  }
+});
 
 exports.sendWhatsAppMessage = catchAsync(async (req, res, next) => {
   const { holiday, date, startAt, finishAt, address, limit } = req.body;
 
-  const customers = await TestModel.find(
-    {},
-    { phoneNumber: 1, name: 1 }
-  ).select("-_id");
+  limitForTheFirestMessage = limit;
+  console.log("limitForTheFirestMessage = limit", limitForTheFirestMessage);
+
+  const customers = await findeLimitedCustomer(limit, 0);
 
   contentVariables[2] = holiday;
   contentVariables[3] = date;
@@ -67,47 +110,50 @@ exports.sendWhatsAppMessage = catchAsync(async (req, res, next) => {
     });
 });
 
+const findeLimitedCustomer = (limit, skip) => {
+  return TestModel.find({}, { phoneNumber: 1, name: 1 })
+    .select("-_id")
+    .limit(limit)
+    .skip(skip);
+};
+
+const sendWhatsAppMessage = async (customers, contentVariables, limit) => {
+  const messagesPromises = customers.slice(0, limit).map((item) => {
+    return client.messages
+      .create({
+        from: process.env.TWILIO_SENDER_SID,
+        contentSid: process.env.TWILIO_CONTECT_SID,
+        contentVariables: JSON.stringify({
+          1: item.name,
+          ...contentVariables,
+        }),
+        to: `whatsapp:${item.phoneNumber}`,
+      })
+      .then((message) => {
+        registerMessage(message, item.phoneNumber);
+      });
+  });
+
+  return Promise.all(messagesPromises);
+};
+
 const registerMessage = async (message, phoneNumber) => {
   console.log("Create a Sync Map Item with the message");
   try {
-    const mapItem = await client.sync.v1
-      .services("IS16b41630f993c2c3352660c818787459")
-      .syncMaps("MPfaf5f41b16230fbaa11472968b2c5372")
+    const mapItem = await client.sync
+      .services(process.env.SYNC_SERVICE_SID)
+      .syncMaps(process.env.SYNC_MAP_SID)
       .syncMapItems.create({
         key: `${phoneNumber}_${message.sid}`, // Use the phone number and message SID as the key
         data: {
           phoneNumber,
           contentVariables,
-          contentSid: "HXd47f1233df00cb1fe569bcf1d7f02601",
+          contentSid: process.env.TWILIO_CONTECT_SID,
         },
       });
 
     console.log(`Map Item registered with SID ${mapItem.mapSid}`);
   } catch (err) {
     console.log("Error registering message:", err);
-  }
-};
-
-const event = {
-  OriginalRepliedMessageSid: "someSid",
-  From: "somePhoneNumber",
-  ButtonPayload: "yes",
-};
-
-exports.makeNewArrivalCustomer = async (context, event) => {
-  try {
-    const response = await exports.handler(context, event);
-
-    const { twiml, phone } = response;
-
-    // Access the phone number returned from the function
-    console.log("Phone number:", phone);
-
-    // Continue with other logic using the phone number and twiml
-    // For example, you can send the TwiML response back to the Twilio API
-    return twiml.toString();
-  } catch (err) {
-    console.error("Error processing event:", err);
-    return err;
   }
 };
